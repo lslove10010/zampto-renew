@@ -39,7 +39,6 @@ async function sendTelegramMessage(message, imagePath = null) {
         return;
     }
 
-    // 1. 发送文字消息
     try {
         const url = `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`;
         await axios.post(url, {
@@ -52,7 +51,6 @@ async function sendTelegramMessage(message, imagePath = null) {
         console.error('[Telegram] 文字消息发送失败:', e.message);
     }
 
-    // 2. 发送图片
     if (imagePath && fs.existsSync(imagePath)) {
         console.log('[Telegram] 正在发送图片...');
         const cmd = `curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendPhoto" -F chat_id="${TG_CHAT_ID}" -F photo="@${imagePath}" -F caption="Debug Screenshot"`;
@@ -69,24 +67,6 @@ async function sendTelegramMessage(message, imagePath = null) {
 
 // 启用 stealth 插件
 chromium.use(stealth);
-
-// Proxy Configuration
-const HTTP_PROXY = process.env.HTTP_PROXY;
-let PROXY_CONFIG = null;
-
-if (HTTP_PROXY) {
-    try {
-        const proxyUrl = new URL(HTTP_PROXY);
-        PROXY_CONFIG = {
-            server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
-            username: proxyUrl.username ? decodeURIComponent(proxyUrl.username) : undefined,
-            password: proxyUrl.password ? decodeURIComponent(proxyUrl.password) : undefined
-        };
-        console.log(`[代理] 配置: ${PROXY_CONFIG.server}`);
-    } catch (e) {
-        console.error('[代理] 格式无效:', e.message);
-    }
-}
 
 // 注入脚本：检测 Turnstile 坐标
 const INJECTED_SCRIPT = `
@@ -155,7 +135,6 @@ function getUsers() {
 
 // 检查是否登录成功
 async function checkLoginSuccess(page) {
-    // 检查是否被拦截
     const blockedTexts = ['Access Blocked', 'VPN', 'Proxy Detected', 'blocked', 'access denied'];
     const pageContent = await page.content().catch(() => '');
     
@@ -165,10 +144,8 @@ async function checkLoginSuccess(page) {
         }
     }
     
-    // 检查是否在登录页
     const url = page.url();
     if (url.includes('sign-in') || url.includes('login') || url.includes('auth')) {
-        // 检查是否有错误信息
         const errorSelectors = ['.error', '.alert', '[role="alert"]', '.text-danger', '.text-red'];
         for (const selector of errorSelectors) {
             try {
@@ -184,7 +161,6 @@ async function checkLoginSuccess(page) {
         return { success: false, reason: 'still_on_login_page', message: '仍在登录页面' };
     }
     
-    // 检查是否有仪表盘/主页特征
     const successIndicators = ['Servers Overview', 'Dashboard', 'Manage Server', 'Create Server', 'homepage', 'dash.zampto'];
     for (const indicator of successIndicators) {
         if (pageContent.toLowerCase().includes(indicator.toLowerCase()) || url.toLowerCase().includes(indicator.toLowerCase())) {
@@ -192,7 +168,6 @@ async function checkLoginSuccess(page) {
         }
     }
     
-    // 检查是否有用户名显示（通常表示已登录）
     try {
         const userMenu = page.locator('[class*="user"], [class*="account"], [class*="profile"]').first();
         if (await userMenu.isVisible({ timeout: 1000 })) {
@@ -222,7 +197,6 @@ async function handleTurnstile(page, contextName = '未知') {
     console.log(`[${contextName}] ✅ 发现 Turnstile，尝试验证...`);
     
     try {
-        // 使用注入脚本获取精确坐标
         const turnstileData = await turnstileFrame.evaluate(() => window.__turnstile_data).catch(() => null);
         
         if (turnstileData && turnstileData.found) {
@@ -254,7 +228,6 @@ async function handleTurnstile(page, contextName = '未知') {
                 await client.detach();
             }
         } else {
-            // 备用方法：点击 iframe 中心
             console.log(`[${contextName}] 使用备用方法：点击中心`);
             const iframeElement = await turnstileFrame.frameElement();
             const box = await iframeElement.boundingBox();
@@ -263,10 +236,8 @@ async function handleTurnstile(page, contextName = '未知') {
             }
         }
         
-        // 等待验证结果
         await page.waitForTimeout(3000);
         
-        // 检查验证状态
         for (let i = 0; i < 10; i++) {
             try {
                 const verified = await turnstileFrame.evaluate(() => {
@@ -298,22 +269,11 @@ async function handleTurnstile(page, contextName = '未知') {
         process.exit(1);
     }
 
-    // 启动浏览器
     console.log('启动浏览器...');
-    const launchOptions = {
+    const browser = await chromium.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
-    };
-    
-    if (PROXY_CONFIG) {
-        launchOptions.proxy = {
-            server: PROXY_CONFIG.server,
-            username: PROXY_CONFIG.username,
-            password: PROXY_CONFIG.password
-        };
-    }
-    
-    const browser = await chromium.launch(launchOptions);
+    });
     console.log('浏览器启动成功');
 
     const context = await browser.newContext({
@@ -326,7 +286,6 @@ async function handleTurnstile(page, contextName = '未知') {
     await page.addInitScript(INJECTED_SCRIPT);
     console.log('注入脚本已添加');
 
-    // 处理每个用户
     for (let i = 0; i < users.length; i++) {
         const user = users[i];
         const safeUser = getSafeUsername(user.username);
@@ -338,7 +297,6 @@ async function handleTurnstile(page, contextName = '未知') {
         let renewInfo = null;
 
         try {
-            // 1. 进入登录页
             console.log('导航到 Zampto 登录页...');
             await page.goto('https://auth.zampto.net/sign-in');
             await page.waitForTimeout(2000);
@@ -346,7 +304,6 @@ async function handleTurnstile(page, contextName = '未知') {
             const loginInitShot = await saveScreenshot(page, `${safeUser}_01_login_init.png`);
             await sendTelegramMessage(`🔄 开始处理用户: ${user.username}\n步骤: 进入登录页`, loginInitShot);
 
-            // 2. 输入邮箱
             console.log('输入邮箱...');
             const emailInput = page.locator('input[type="text"], input[type="email"]').first();
             await emailInput.waitFor({ state: 'visible', timeout: 10000 });
@@ -355,14 +312,12 @@ async function handleTurnstile(page, contextName = '未知') {
 
             const emailFilledShot = await saveScreenshot(page, `${safeUser}_02_email_filled.png`);
 
-            // 3. 点击登录按钮
             console.log('点击登录按钮...');
             await page.getByRole('button', { name: /登录|Login|Sign in/i }).click();
             await page.waitForTimeout(3000);
             
             const passwordPageShot = await saveScreenshot(page, `${safeUser}_03_password_page.png`);
 
-            // 4. 输入密码
             console.log('输入密码...');
             const pwdInput = page.locator('input[type="password"]').first();
             await pwdInput.waitFor({ state: 'visible', timeout: 10000 });
@@ -371,14 +326,12 @@ async function handleTurnstile(page, contextName = '未知') {
 
             const pwdFilledShot = await saveScreenshot(page, `${safeUser}_04_pwd_filled.png`);
 
-            // 5. 点击继续
             console.log('点击继续按钮...');
             await page.getByRole('button', { name: /继续|Continue/i }).click();
             await page.waitForTimeout(4000);
             
             const afterLoginShot = await saveScreenshot(page, `${safeUser}_05_after_login.png`);
 
-            // 6. 检查登录结果（修复后的判断逻辑）
             console.log('检查登录状态...');
             const loginCheck = await checkLoginSuccess(page);
             
@@ -395,7 +348,6 @@ async function handleTurnstile(page, contextName = '未知') {
             console.log('✅ 登录成功，当前 URL:', page.url());
             await sendTelegramMessage(`✅ 用户 ${user.username} 登录成功\nURL: ${page.url()}`, afterLoginShot);
 
-            // 7. 点击 Servers Overview
             console.log('点击 Servers Overview...');
             try {
                 await page.getByRole('link', { name: /Servers Overview/i }).click();
@@ -406,7 +358,6 @@ async function handleTurnstile(page, contextName = '未知') {
             await page.waitForTimeout(3000);
             const serversOverviewShot = await saveScreenshot(page, `${safeUser}_06_servers_overview.png`);
 
-            // 8. 获取服务器列表
             console.log('获取服务器列表...');
             const manageButtons = await page.getByRole('button', { name: /Manage Server/i }).all();
             console.log(`找到 ${manageButtons.length} 个 Manage Server 按钮`);
@@ -420,7 +371,6 @@ async function handleTurnstile(page, contextName = '未知') {
                 continue;
             }
 
-            // 处理每个服务器
             for (let serverIdx = 0; serverIdx < manageButtons.length; serverIdx++) {
                 console.log(`\n--- 处理第 ${serverIdx + 1}/${manageButtons.length} 个服务器 ---`);
                 
@@ -448,7 +398,6 @@ async function handleTurnstile(page, contextName = '未知') {
                 await page.waitForTimeout(3000);
                 const serverDetailShot = await saveScreenshot(page, `${safeUser}_07_server_${serverIdx + 1}_detail.png`);
 
-                // 9. 查找 Renew Server 按钮
                 console.log('查找 Renew Server 按钮...');
                 
                 let renewBtn = null;
@@ -462,7 +411,6 @@ async function handleTurnstile(page, contextName = '未知') {
                     continue;
                 }
 
-                // 获取续期前信息
                 let beforeRenewInfo = {};
                 try {
                     const renewSection = page.locator('div:has-text("Renew"), div:has-text("Server last renewed")').first();
@@ -476,14 +424,12 @@ async function handleTurnstile(page, contextName = '未知') {
                     };
                 } catch (e) {}
 
-                // 点击 Renew Server
                 await renewBtn.click();
                 console.log('✅ 已点击 Renew Server');
                 
                 await page.waitForTimeout(2000);
                 const renewModalShot = await saveScreenshot(page, `${safeUser}_08_renew_modal.png`);
 
-                // 10. 处理人机验证
                 console.log('处理人机验证...');
                 await page.waitForTimeout(2000);
                 
@@ -496,7 +442,6 @@ async function handleTurnstile(page, contextName = '未知') {
                 await page.waitForTimeout(5000);
                 const afterVerifyShot = await saveScreenshot(page, `${safeUser}_09_after_verify.png`);
 
-                // 11. 获取续期后信息
                 console.log('获取续期后信息...');
                 await page.waitForTimeout(3000);
                 
@@ -549,7 +494,6 @@ async function handleTurnstile(page, contextName = '未知') {
                     await sendTelegramMessage(message, finalScreenshot);
                 }
 
-                // 关闭弹窗
                 try {
                     const closeBtn = page.getByRole('button', { name: /Cancel|Close|×/i }).first();
                     if (await closeBtn.isVisible({ timeout: 1000 })) {
@@ -558,7 +502,6 @@ async function handleTurnstile(page, contextName = '未知') {
                     }
                 } catch (e) {}
 
-                // 返回服务器列表
                 await page.goto('https://dash.zampto.net/servers');
                 await page.waitForTimeout(3000);
             }
@@ -581,7 +524,6 @@ async function handleTurnstile(page, contextName = '未知') {
             await sendTelegramMessage(message, finalScreenshot);
         }
 
-        // 最终截图
         try {
             const finalShot = await saveScreenshot(page, `${safeUser}_final_${status}.png`);
             console.log(`用户 ${user.username} 处理完成，状态: ${status}`);
