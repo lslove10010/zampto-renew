@@ -13,7 +13,6 @@ on:
 
 env:
   NODE_VERSION: '20'
-  CHROME_VERSION: 'stable'
 
 jobs:
   renew:
@@ -27,11 +26,11 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
+        # 注意：没有 cache: 'npm'，不需要 package-lock.json
 
     - name: Install dependencies
       run: |
-        npm ci
+        npm install
         npx playwright install-deps chromium
 
     - name: Install Google Chrome
