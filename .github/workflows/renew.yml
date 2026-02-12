@@ -26,6 +26,43 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
 
+    - name: Install Cloudflare WARP
+      run: |
+        echo "Installing Cloudflare WARP..."
+        # 添加 Cloudflare 仓库
+        curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+        
+        # 安装 WARP
+        sudo apt-get update
+        sudo apt-get install -y cloudflare-warp
+        
+        # 启动 WARP 服务
+        sudo warp-svc &
+        sleep 2
+        
+        # 注册（首次运行需要）
+        sudo warp-cli registration new || true
+        
+        # 连接 WARP
+        sudo warp-cli connect
+        
+        # 等待连接建立
+        echo "Waiting for WARP connection..."
+        for i in {1..30}; do
+          STATUS=$(sudo warp-cli status 2>/dev/null || echo "Disconnected")
+          echo "Status: $STATUS"
+          if echo "$STATUS" | grep -q "Connected"; then
+            echo "✅ WARP connected successfully"
+            break
+          fi
+          sleep 1
+        done
+        
+        # 显示当前 IP
+        echo "Current IP info:"
+        curl -s https://ipinfo.io || curl -s https://api.ipify.org
+
     - name: Install Dependencies
       run: |
         npm install
@@ -39,7 +76,7 @@ jobs:
         USERS_JSON: ${{ secrets.USERS_JSON }}
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
+        # 不设置 HTTP_PROXY，使用 WARP 作为网络层
       run: |
         echo "Starting Zampto auto renew..."
         node renew.js
@@ -51,3 +88,9 @@ jobs:
         name: screenshots-${{ github.run_id }}
         path: screenshots/
         retention-days: 7
+
+    - name: Disconnect WARP
+      if: always()
+      run: |
+        sudo warp-cli disconnect || true
+        sudo pkill warp-svc || true
