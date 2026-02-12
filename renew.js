@@ -153,6 +153,56 @@ function getUsers() {
     return [];
 }
 
+// 检查是否登录成功
+async function checkLoginSuccess(page) {
+    // 检查是否被拦截
+    const blockedTexts = ['Access Blocked', 'VPN', 'Proxy Detected', 'blocked', 'access denied'];
+    const pageContent = await page.content().catch(() => '');
+    
+    for (const text of blockedTexts) {
+        if (pageContent.toLowerCase().includes(text.toLowerCase())) {
+            return { success: false, reason: 'access_blocked', message: '检测到 VPN/代理被拦截' };
+        }
+    }
+    
+    // 检查是否在登录页
+    const url = page.url();
+    if (url.includes('sign-in') || url.includes('login') || url.includes('auth')) {
+        // 检查是否有错误信息
+        const errorSelectors = ['.error', '.alert', '[role="alert"]', '.text-danger', '.text-red'];
+        for (const selector of errorSelectors) {
+            try {
+                const errorEl = page.locator(selector).first();
+                if (await errorEl.isVisible({ timeout: 1000 })) {
+                    const errorText = await errorEl.innerText();
+                    if (errorText && errorText.length > 0) {
+                        return { success: false, reason: 'login_error', message: errorText };
+                    }
+                }
+            } catch (e) {}
+        }
+        return { success: false, reason: 'still_on_login_page', message: '仍在登录页面' };
+    }
+    
+    // 检查是否有仪表盘/主页特征
+    const successIndicators = ['Servers Overview', 'Dashboard', 'Manage Server', 'Create Server', 'homepage', 'dash.zampto'];
+    for (const indicator of successIndicators) {
+        if (pageContent.toLowerCase().includes(indicator.toLowerCase()) || url.toLowerCase().includes(indicator.toLowerCase())) {
+            return { success: true };
+        }
+    }
+    
+    // 检查是否有用户名显示（通常表示已登录）
+    try {
+        const userMenu = page.locator('[class*="user"], [class*="account"], [class*="profile"]').first();
+        if (await userMenu.isVisible({ timeout: 1000 })) {
+            return { success: true };
+        }
+    } catch (e) {}
+    
+    return { success: false, reason: 'unknown', message: '无法确定登录状态' };
+}
+
 // 处理 Turnstile 验证
 async function handleTurnstile(page, contextName = '未知') {
     console.log(`[${contextName}] 检查 Turnstile...`);
@@ -248,7 +298,7 @@ async function handleTurnstile(page, contextName = '未知') {
         process.exit(1);
     }
 
-    // 启动浏览器（使用 Playwright 内置 Chromium）
+    // 启动浏览器
     console.log('启动浏览器...');
     const launchOptions = {
         headless: true,
@@ -328,19 +378,14 @@ async function handleTurnstile(page, contextName = '未知') {
             
             const afterLoginShot = await saveScreenshot(page, `${safeUser}_05_after_login.png`);
 
-            // 6. 检查登录结果
-            if (page.url().includes('sign-in') || page.url().includes('login')) {
-                let failReason = '未知错误';
-                try {
-                    const errorLoc = page.locator('.error, .alert, [role="alert"]').first();
-                    if (await errorLoc.isVisible({ timeout: 2000 })) {
-                        failReason = await errorLoc.innerText();
-                    }
-                } catch (e) {}
-                
-                console.error(`❌ 登录失败: ${failReason}`);
+            // 6. 检查登录结果（修复后的判断逻辑）
+            console.log('检查登录状态...');
+            const loginCheck = await checkLoginSuccess(page);
+            
+            if (!loginCheck.success) {
+                console.error(`❌ 登录失败: ${loginCheck.message}`);
                 status = 'login_failed';
-                message = `❌ *登录失败*\n用户: ${user.username}\n原因: ${failReason}`;
+                message = `❌ *登录失败*\n用户: ${user.username}\n原因: ${loginCheck.message}`;
                 finalScreenshot = afterLoginShot;
                 
                 await sendTelegramMessage(message, finalScreenshot);
