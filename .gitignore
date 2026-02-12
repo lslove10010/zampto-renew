@@ -1,7 +1,7 @@
 node_modules/
-login.json
-ChromeData_Katabump/
-.env
+screenshots/
 *.log
+.env
+.env.local
 .DS_Store
-photo/
+/tmp/
