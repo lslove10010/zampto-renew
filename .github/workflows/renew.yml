@@ -1,0 +1,93 @@
+name: Zampto Auto Renew (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      user_index:
+        description: '指定用户索引 (0-based, 留空处理所有)'
+        required: false
+        default: ''
+      debug:
+        description: '启用调试模式'
+        required: false
+        default: 'true'
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  renew-single:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        npm ci
+        npx playwright install-deps chromium
+
+    - name: Install Google Chrome
+      run: |
+        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+
+    - name: Create screenshots directory
+      run: mkdir -p screenshots
+
+    - name: Run auto renew script (Single User)
+      if: github.event.inputs.user_index != ''
+      env:
+        USERS_JSON: ${{ secrets.USERS_JSON }}
+        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
+        CHROME_PATH: '/usr/bin/google-chrome'
+        DEBUG: ${{ github.event.inputs.debug }}
+        USER_INDEX: ${{ github.event.inputs.user_index }}
+      run: |
+        echo "Processing single user index: $USER_INDEX"
+        node -e "
+        const fs = require('fs');
+        const users = JSON.parse(process.env.USERS_JSON);
+        const idx = parseInt(process.env.USER_INDEX);
+        if (idx >= 0 && idx < users.length) {
+          fs.writeFileSync('/tmp/single_user.json', JSON.stringify([users[idx]]));
+          console.log('Selected user:', users[idx].username);
+        } else {
+          console.error('Invalid user index');
+          process.exit(1);
+        }
+        "
+        export USERS_JSON=$(cat /tmp/single_user.json)
+        node renew.js
+
+    - name: Run auto renew script (All Users)
+      if: github.event.inputs.user_index == ''
+      env:
+        USERS_JSON: ${{ secrets.USERS_JSON }}
+        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
+        CHROME_PATH: '/usr/bin/google-chrome'
+        DEBUG: ${{ github.event.inputs.debug }}
+      run: |
+        echo "Processing all users..."
+        node renew.js
+
+    - name: Upload screenshots
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: screenshots-manual-${{ github.run_id }}
+        path: screenshots/
+        retention-days: 7
