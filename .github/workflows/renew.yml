@@ -2,7 +2,6 @@ name: Zampto Auto Renew
 
 on:
   schedule:
-    # 每天 UTC 02:00 运行 (北京时间 10:00)
     - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
@@ -26,45 +25,29 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
-        # 注意：没有 cache: 'npm'，不需要 package-lock.json
 
-    - name: Install dependencies
+    - name: Install Dependencies
       run: |
         npm install
-        npx playwright install-deps chromium
-
-    - name: Install Google Chrome
-      run: |
-        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-        sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable
-        google-chrome --version
+        npx playwright install chromium
 
     - name: Create screenshots directory
       run: mkdir -p screenshots
 
-    - name: Run auto renew script
+    - name: Run Renew Script
       env:
         USERS_JSON: ${{ secrets.USERS_JSON }}
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
-        CHROME_PATH: '/usr/bin/google-chrome'
-        DEBUG: ${{ github.event.inputs.debug || 'false' }}
       run: |
         echo "Starting Zampto auto renew..."
         node renew.js
 
-    - name: Upload screenshots
+    - name: Upload Screenshots
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: screenshots-${{ github.run_id }}
         path: screenshots/
         retention-days: 7
-
-    - name: Cleanup
-      if: always()
-      run: |
-        rm -rf /tmp/chrome_user_data
